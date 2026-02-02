@@ -1,13 +1,10 @@
 class TaxEngine:
-    def __init__(self, config):
-        self.config = config
+    def __init__(self):
+        self.low_rate = 0.27
+        self.high_rate = 0.42
+        self.threshold = 10000
 
-    def realized_tax(self, gain):
-        if gain <= 0:
-            return 0.0
-        if gain <= self.config.threshold:
-            return gain * self.config.lower_rate
-        return (
-            self.config.threshold * self.config.lower_rate +
-            (gain - self.config.threshold) * self.config.upper_rate
-        )
+    def tax_due(self, realized_gain):
+        if realized_gain <= self.threshold:
+            return realized_gain * self.low_rate
+        return self.threshold * self.low_rate + (realized_gain - self.threshold) * self.high_rate
