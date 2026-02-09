@@ -1,0 +1,11 @@
+[
+    {
+        "adapter": "Debugpy",
+        "label": "run '/home/franc/portfolio_from_gpt/main.py'",
+        "request": "launch",
+        "python": "$ZED_CUSTOM_PYTHON_ACTIVE_ZED_TOOLCHAIN",
+        "args": [],
+        "cwd": "$ZED_WORKTREE_ROOT",
+        "program": "\"$ZED_FILE\""
+    }
+]
