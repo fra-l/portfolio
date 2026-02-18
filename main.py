@@ -1,7 +1,5 @@
 # main.py
 
-import pandas as pd
-
 from data.market_data import MarketData
 from factors.factor_model import FactorModel
 from universe.universe_selector import UniverseSelector
@@ -20,11 +18,8 @@ def main():
     # --------------------------------------------------
     # 1. Load data (NO logic here)
     # --------------------------------------------------
-    prices = pd.read_csv("data/prices.csv", index_col=0, parse_dates=True)
-    returns = pd.read_csv("data/returns.csv", index_col=0, parse_dates=True)
-    factor_returns = pd.read_csv("data/factor_returns.csv", index_col=0, parse_dates=True)
-
-    market_data = MarketData(prices, returns)
+    tickers = ["AAPL", "MSFT", "JNJ"]
+    market_data, factor_returns = MarketData.from_tickers(tickers, start="2020-01-01")
 
     # --------------------------------------------------
     # 2. Initialize models
@@ -71,7 +66,7 @@ def main():
         strategy=strategy
     )
 
-    backtest.run(prices.index)
+    backtest.run(market_data.prices.index)
 
     # --------------------------------------------------
     # 6. Reporting / output

@@ -2,3 +2,5 @@ numpy
 pandas
 cvxpy
 scikit-learn
+yfinance
+requests
