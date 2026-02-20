@@ -123,6 +123,10 @@ class TickerUniverse:
         cap_tiers=None,
         min_adv=None,
         min_market_cap=None,
+        max_pe=None,
+        max_pb=None,
+        min_dividend_yield=None,
+        max_beta=None,
     ):
         """
         Return a list of tickers matching all specified criteria.
@@ -144,6 +148,14 @@ class TickerUniverse:
             Minimum average daily dollar volume (USD).
         min_market_cap : float | None
             Minimum market capitalisation (USD).
+        max_pe : float | None
+            Maximum trailing P/E ratio. Tickers with no reported P/E are excluded.
+        max_pb : float | None
+            Maximum price-to-book ratio. Tickers with no reported P/B are excluded.
+        min_dividend_yield : float | None
+            Minimum dividend yield (e.g. 0.01 = 1%). Tickers with no yield are excluded.
+        max_beta : float | None
+            Maximum 5-year monthly beta. Tickers with no reported beta are excluded.
         """
         df = self._df.copy()
 
@@ -160,7 +172,15 @@ class TickerUniverse:
             return []
 
         # --- Live filters ---
-        needs_live = cap_tiers or min_adv is not None or min_market_cap is not None
+        needs_live = (
+            cap_tiers
+            or min_adv is not None
+            or min_market_cap is not None
+            or max_pe is not None
+            or max_pb is not None
+            or min_dividend_yield is not None
+            or max_beta is not None
+        )
         if needs_live:
             self._ensure_live()
             live = self._live[self._live.index.isin(tickers)].copy()
@@ -178,6 +198,18 @@ class TickerUniverse:
 
             if min_market_cap is not None:
                 live = live[live["market_cap"] >= min_market_cap]
+
+            if max_pe is not None:
+                live = live[live["pe"].notna() & (live["pe"] <= max_pe)]
+
+            if max_pb is not None:
+                live = live[live["pb"].notna() & (live["pb"] <= max_pb)]
+
+            if min_dividend_yield is not None:
+                live = live[live["dividend_yield"].notna() & (live["dividend_yield"] >= min_dividend_yield)]
+
+            if max_beta is not None:
+                live = live[live["beta"].notna() & (live["beta"] <= max_beta)]
 
             tickers = [t for t in tickers if t in live.index]
 
@@ -211,7 +243,7 @@ class TickerUniverse:
             return
 
         tickers = self._df["ticker"].tolist()
-        print(f"[TickerUniverse] Fetching live market cap + ADV for {len(tickers)} tickers…")
+        print(f"[TickerUniverse] Fetching live data for {len(tickers)} tickers…")
 
         # --- ADV: bulk price+volume download ---
         raw = yf.download(tickers, period=self._adv_lookback,
@@ -224,15 +256,34 @@ class TickerUniverse:
         dollar_vol = close * volume
         adv = dollar_vol.mean().rename("adv")
 
-        # --- Market cap: fast_info per ticker ---
-        market_caps = {}
+        # --- Per-ticker fundamentals: market cap, P/E, P/B, dividend yield, beta ---
+        market_caps, pe_ratios, pb_ratios, dividend_yields, betas = {}, {}, {}, {}, {}
         for ticker in tickers:
             try:
+                info = yf.Ticker(ticker).info
                 mc = yf.Ticker(ticker).fast_info.market_cap
                 market_caps[ticker] = float(mc) if mc else 0.0
+                pe  = info.get("trailingPE")
+                pb  = info.get("priceToBook")
+                dy  = info.get("dividendYield")
+                bt  = info.get("beta")
+                pe_ratios[ticker]       = float(pe)  if pe  is not None else float("nan")
+                pb_ratios[ticker]       = float(pb)  if pb  is not None else float("nan")
+                dividend_yields[ticker] = float(dy)  if dy  is not None else float("nan")
+                betas[ticker]           = float(bt)  if bt  is not None else float("nan")
             except Exception:
-                market_caps[ticker] = 0.0
+                market_caps[ticker]     = 0.0
+                pe_ratios[ticker]       = float("nan")
+                pb_ratios[ticker]       = float("nan")
+                dividend_yields[ticker] = float("nan")
+                betas[ticker]           = float("nan")
 
-        mc_series = pd.Series(market_caps, name="market_cap")
-        self._live = pd.concat([mc_series, adv], axis=1)
+        self._live = pd.concat([
+            pd.Series(market_caps,     name="market_cap"),
+            adv,
+            pd.Series(pe_ratios,       name="pe"),
+            pd.Series(pb_ratios,       name="pb"),
+            pd.Series(dividend_yields, name="dividend_yield"),
+            pd.Series(betas,           name="beta"),
+        ], axis=1)
         self._live.index.name = "ticker"

@@ -82,7 +82,8 @@ class FactorReplicationStrategy:
             end=end
         )
         exposures, r2 = self.factor_model.estimate_exposures(returns)
-        universe = self.universe_selector.select(exposures, r2)
+        volatility = returns.std() * (252 ** 0.5)
+        universe = self.universe_selector.select(exposures, r2, volatility=volatility)
         exposures = exposures.loc[universe]
         current_exposure = self._portfolio_factor_exposure(exposures, date)
         target_exposure = np.array(
