@@ -1,6 +1,7 @@
 # main.py
 
-from config import TaxConfig, TradingCostConfig
+from config import TaxConfig, TradingCostConfig, MarginConfig
+from trading.margin_cost import MarginCostModel
 from data.market_data import MarketData
 from factors.factor_model import FactorModel
 from universe.universe_selector import UniverseSelector
@@ -11,6 +12,7 @@ from decisions.decision_engine import DecisionEngine
 from execution.executor import Executor
 from optimizer.factor_replication_optimizer import FactorReplicationOptimizer
 from backtest.engine import BacktestEngine
+from tax.tax_harvesting import TaxHarvestingEngine
 
 from strategy.strategy import FactorReplicationStrategy
 
@@ -42,7 +44,7 @@ def main():
         # Materials
         "LIN", "BHP",
     ]
-    market_data, factor_returns = MarketData.from_tickers(tickers, start="2020-01-01")
+    market_data, factor_returns, spy_prices = MarketData.from_tickers(tickers, start="2020-01-01")
 
     # --------------------------------------------------
     # 2. Initialize models
@@ -60,13 +62,23 @@ def main():
     # --------------------------------------------------
     portfolio = Portfolio(cash=20_000)
 
-    tax_engine = TaxEngine(config=TaxConfig())
+    tax_config = TaxConfig()
+    tax_engine = TaxEngine(config=tax_config)
+    margin_config = MarginConfig()          # enabled=False by default; set enabled=True to use
+    margin_cost_model = MarginCostModel()
     decision_engine = DecisionEngine(
         tax_engine=tax_engine,
         trading_cost_config=TradingCostConfig(),
+        margin_config=margin_config,
+        margin_cost_model=margin_cost_model,
     )
 
     executor = Executor(market_data)
+    harvester = TaxHarvestingEngine(
+        config=tax_config,
+        tax_engine=tax_engine,
+        executor=executor,
+    )
     optimizer = FactorReplicationOptimizer()
 
     # --------------------------------------------------
@@ -81,6 +93,9 @@ def main():
         decision_engine=decision_engine,
         executor=executor,
         optimizer=optimizer,
+        harvester=harvester,
+        margin_config=margin_config,
+        margin_cost_model=margin_cost_model,
     )
 
     # --------------------------------------------------
@@ -105,6 +120,8 @@ def main():
     years = (history.index[-1] - history.index[0]).days / 365.25
     ann_return_pct = ((final_value / initial_value) ** (1 / years) - 1) * 100
     total_realized = sum(g["realized_gain"] for g in strategy.realized_gains)
+    harvest_events = [r for r in strategy.realized_gains if r.get("is_harvest")]
+    total_tax_saved = sum(r.get("tax_saved", 0.0) for r in harvest_events)
     last_date = market_data.prices.index[-1]
 
     print(f"\n{'='*52}")
@@ -116,7 +133,13 @@ def main():
     print(f"  Total return:     {total_return_pct:>+11.1f}%")
     print(f"  Annualized:       {ann_return_pct:>+11.1f}%")
     print(f"  Realized gains:   €{total_realized:>12,.2f}")
-    print(f"  Rebalances:       {len(strategy.realized_gains):>12}")
+    print(f"  Rebalances:       {len(strategy.realized_gains) - len(harvest_events):>12}")
+    print(f"  Harvest events:   {len(harvest_events):>12}")
+    print(f"  Est. tax saved:   €{total_tax_saved:>12,.2f}")
+    peak_leverage = max((h.get("leverage", 1.0) for h in backtest.history), default=1.0)
+    print(f"  Margin balance:   €{portfolio.margin_balance:>12,.2f}")
+    print(f"  Peak leverage:    {peak_leverage:>11.2f}×")
+    print(f"  Interest paid:    €{strategy.total_interest_paid:>12,.2f}")
     print(f"\n  Final positions:")
     for ticker, position in sorted(portfolio.positions.items()):
         shares = position.total_shares()
@@ -127,6 +150,10 @@ def main():
         print(f"    {ticker:<14}  {shares:>10.4f} shares   €{value:>10,.2f}")
     print(f"    {'Cash':<14}  {'':>17}   €{portfolio.cash:>10,.2f}")
     print(f"{'='*52}")
+
+    from reporting.charts import plot_results
+    plot_results(history=backtest.history, trades=executor.trades,
+                 spy_prices=spy_prices, initial_value=initial_value)
 
 
 if __name__ == "__main__":

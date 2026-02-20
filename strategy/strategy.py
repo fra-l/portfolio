@@ -15,6 +15,9 @@ class FactorReplicationStrategy:
         decision_engine,
         executor,
         optimizer=None,
+        harvester=None,
+        margin_config=None,
+        margin_cost_model=None,
         rebalance_frequency="M",
         lookback_days=252
     ):
@@ -26,13 +29,49 @@ class FactorReplicationStrategy:
         self.decision_engine = decision_engine
         self.executor = executor
         self.optimizer = optimizer
+        self.harvester = harvester
+        self.margin_config = margin_config
+        self.margin_cost_model = margin_cost_model
         self.rebalance_frequency = rebalance_frequency
         self.lookback_days = lookback_days
 
         self.last_rebalance_date = None
         self.realized_gains = []
+        self.total_interest_paid = 0.0
 
     def on_date(self, date):
+        # Margin: daily interest accrual and margin-call check (every day)
+        if self.margin_config is not None and self.margin_config.enabled \
+                and self.portfolio.margin_balance > 0:
+            interest = self.margin_cost_model.daily_interest(
+                self.portfolio.margin_balance, self.margin_config.annual_rate
+            )
+            self.portfolio.cash -= interest
+            self.total_interest_paid += interest
+
+            if self.portfolio.leverage_ratio(self.market_data, date) \
+                    > self.margin_config.max_leverage:
+                self._forced_liquidation(date)
+
+        # Tax-loss harvesting — runs in configured months, independent of rebalance gate
+        if self.harvester is not None:
+            ytd_gains = self._realized_gains_ytd(date)
+            harvest_records = self.harvester.harvest(
+                portfolio=self.portfolio,
+                market_data=self.market_data,
+                date=date,
+                realized_gains_ytd=ytd_gains,
+            )
+            for r in harvest_records:
+                self.realized_gains.append({
+                    "date": r["date"],
+                    "ticker": r["ticker"],
+                    "realized_gain": -r["realized_loss"],
+                    "proceeds": r["proceeds"],
+                    "is_harvest": True,
+                    "tax_saved": r["tax_saved"],
+                })
+
         if not self._is_rebalance_date(date):
             return
         end = date
@@ -65,8 +104,24 @@ class FactorReplicationStrategy:
         )
         if not rebalance:
             return
+
+        # High-conviction overlay: borrow up to the leverage cap when signals are strong
+        if self.margin_config is not None and self.margin_config.enabled:
+            conviction = self._conviction_score(r2, tracking_error)
+            if conviction >= self.margin_config.conviction_threshold:
+                equity = self.portfolio.equity_value(self.market_data, date)
+                headroom = equity * (self.margin_config.max_leverage - 1) \
+                           - self.portfolio.margin_balance
+                if headroom > 1.0:
+                    self.executor.borrow(self.portfolio, headroom, date)
+
         self._rebalance_portfolio(universe, exposures, date)
         self.last_rebalance_date = date
+
+        # Repay any margin balance that can be covered by spare cash
+        if self.margin_config is not None and self.margin_config.enabled \
+                and self.portfolio.margin_balance > 0:
+            self.executor.repay(self.portfolio, max(self.portfolio.cash, 0.0), date)
 
     def _is_rebalance_date(self, date):
         if self.last_rebalance_date is None:
@@ -96,6 +151,13 @@ class FactorReplicationStrategy:
 
         return weighted_exposure / total_value
 
+    def _realized_gains_ytd(self, date):
+        return sum(
+            r["realized_gain"]
+            for r in self.realized_gains
+            if r["date"].year == date.year
+        )
+
     def _estimate_unrealized_gains(self, date):
         gain = 0
         for ticker, position in self.portfolio.positions.items():
@@ -103,6 +165,40 @@ class FactorReplicationStrategy:
             for lot in position.lots:
                 gain += (price - lot.cost_basis) * lot.shares
         return max(gain, 0)
+
+    def _conviction_score(self, r2_series, tracking_error):
+        """
+        Score in [0, 1]:  high mean R² (reliable model) × high tracking error
+        (large room for improvement). Capped at 1.0.
+        """
+        mean_r2 = float(r2_series.mean()) if hasattr(r2_series, "mean") else float(r2_series)
+        te_score = min(tracking_error, 1.0)
+        return mean_r2 * te_score
+
+    def _forced_liquidation(self, date):
+        """
+        Sell the smallest positions (cheapest to unwind) until leverage is
+        back within the configured cap, repaying margin from each set of proceeds.
+        """
+        positions_by_value = sorted(
+            [(t, p) for t, p in self.portfolio.positions.items()
+             if p.total_shares() > 1e-12],
+            key=lambda x: x[1].total_shares() * self.market_data.get_price(x[0], date)
+        )
+        for ticker, position in positions_by_value:
+            if self.portfolio.leverage_ratio(self.market_data, date) \
+                    <= self.margin_config.max_leverage:
+                break
+            shares = position.total_shares()
+            result = self.executor.sell(self.portfolio, ticker, shares, date)
+            self.realized_gains.append({
+                "date": date,
+                "ticker": ticker,
+                "realized_gain": result["realized_gain"],
+                "proceeds": result["proceeds"],
+                "is_forced_liquidation": True,
+            })
+            self.executor.repay(self.portfolio, result["proceeds"], date)
 
     def _rebalance_portfolio(self, universe, exposures, date):
         portfolio_value = self.portfolio.market_value(self.market_data, date)
@@ -118,28 +214,50 @@ class FactorReplicationStrategy:
             target_allocations = {ticker: equal_weight for ticker in universe}
 
         # Sell over-allocated or exited positions first
+        # (or borrow instead if that is cheaper than triggering capital gains tax)
         for ticker, position in list(self.portfolio.positions.items()):
             price = self.market_data.get_price(ticker, date)
             current_value = position.total_shares() * price
             target_value = target_allocations.get(ticker, 0.0)
 
             if current_value > target_value + 1e-6:
-                shares_to_sell = (current_value - target_value) / price
-                result = self.executor.sell(
-                    portfolio=self.portfolio,
-                    ticker=ticker,
-                    shares=shares_to_sell,
-                    date=date,
+                sell_amount = current_value - target_value
+                unrealized = sum(
+                    (price - lot.cost_basis) * lot.shares for lot in position.lots
                 )
-                self.realized_gains.append({
-                    "date": date,
-                    "ticker": ticker,
-                    "realized_gain": result["realized_gain"],
-                    "proceeds": result["proceeds"],
-                })
+                if self.decision_engine.should_borrow_instead_of_sell(
+                    unrealized_gain=max(unrealized, 0.0),
+                    sell_amount=sell_amount,
+                    expected_hold_days=self.margin_config.expected_hold_days
+                    if self.margin_config else 90,
+                ):
+                    # Borrow to fund the shortfall rather than crystallise a taxable gain
+                    equity = self.portfolio.equity_value(self.market_data, date)
+                    headroom = equity * (self.margin_config.max_leverage - 1) \
+                               - self.portfolio.margin_balance
+                    borrow_amount = min(sell_amount, max(headroom, 0.0))
+                    if borrow_amount > 1.0:
+                        self.executor.borrow(self.portfolio, borrow_amount, date)
+                else:
+                    shares_to_sell = sell_amount / price
+                    result = self.executor.sell(
+                        portfolio=self.portfolio,
+                        ticker=ticker,
+                        shares=shares_to_sell,
+                        date=date,
+                    )
+                    self.realized_gains.append({
+                        "date": date,
+                        "ticker": ticker,
+                        "realized_gain": result["realized_gain"],
+                        "proceeds": result["proceeds"],
+                    })
 
         # Buy under-allocated positions using available cash
         for ticker in universe:
+            # Skip tickers recently harvested (wash-sale waiting period)
+            if self.harvester is not None and self.harvester.is_wash_sale_blocked(ticker, date):
+                continue
             price = self.market_data.get_price(ticker, date)
             current_value = 0.0
             if ticker in self.portfolio.positions:

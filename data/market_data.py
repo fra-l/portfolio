@@ -69,10 +69,16 @@ class MarketData:
         # from the very first backtest date.
         warmup_start = (pd.Timestamp(start) - pd.Timedelta(days=lookback_days + 60)).strftime("%Y-%m-%d")
 
-        raw = yf.download(tickers, start=warmup_start, end=end, auto_adjust=True, progress=False)
-        prices_full = raw["Close"] if len(tickers) > 1 else raw["Close"].to_frame(tickers[0])
+        # Include SPY for benchmark comparison; extract and remove before constructing MarketData
+        download_tickers = list(tickers) + ["SPY"]
+        raw = yf.download(download_tickers, start=warmup_start, end=end, auto_adjust=True, progress=False)
+        prices_full = raw["Close"] if len(download_tickers) > 1 else raw["Close"].to_frame(download_tickers[0])
         prices_full = prices_full.dropna(how="all")
         prices_full.index = prices_full.index.tz_localize(None)
+
+        # Extract SPY and drop from portfolio prices
+        spy_prices_full = prices_full["SPY"].copy()
+        prices_full = prices_full.drop(columns=["SPY"])
 
         # Compute returns over the full history (needed for lookback)
         returns_full = prices_full.pct_change().dropna(how="all")
@@ -97,4 +103,7 @@ class MarketData:
         start_ts = pd.Timestamp(start)
         prices = prices_full.loc[prices_full.index >= start_ts]
 
-        return cls(prices, returns_full), factor_returns
+        # SPY trimmed to backtest start date
+        spy_prices = spy_prices_full.loc[spy_prices_full.index >= start_ts]
+
+        return cls(prices, returns_full), factor_returns, spy_prices
