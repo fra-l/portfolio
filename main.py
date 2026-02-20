@@ -14,6 +14,7 @@ from optimizer.factor_replication_optimizer import FactorReplicationOptimizer
 from backtest.engine import BacktestEngine
 from tax.tax_harvesting import TaxHarvestingEngine
 
+from universe.ticker_universe import TickerUniverse
 from strategy.strategy import FactorReplicationStrategy
 
 
@@ -22,28 +23,12 @@ def main():
     # --------------------------------------------------
     # 1. Load data (NO logic here)
     # --------------------------------------------------
-    tickers = [
-        # US Tech
-        "AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSLA",
-        # US Financials
-        "JPM", "BAC", "GS", "BRK-B", "V", "MA",
-        # US Healthcare
-        "JNJ", "UNH", "PFE", "ABBV", "MRK", "LLY",
-        # US Consumer
-        "PG", "KO", "PEP", "WMT", "COST", "MCD", "NKE",
-        # US Industrials
-        "CAT", "HON", "UPS", "BA", "GE",
-        # US Energy
-        "XOM", "CVX", "COP",
-        # US Utilities / REITs
-        "NEE", "DUK", "AMT",
-        # Europe
-        "NESN.SW", "NOVO-B.CO", "ASML", "SAP", "MC.PA", "SHEL", "AZN",
-        # Asia-Pacific
-        "TM", "SONY", "9988.HK",
-        # Materials
-        "LIN", "BHP",
-    ]
+    ticker_universe = TickerUniverse()
+    tickers = ticker_universe.select(
+        regions=["US", "Europe", "Asia-Pacific"],
+        cap_tiers=["mega", "large"],
+        min_adv=1e8,
+    )
     market_data, factor_returns, spy_prices = MarketData.from_tickers(tickers, start="2020-01-01")
 
     # --------------------------------------------------
