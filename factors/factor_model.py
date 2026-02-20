@@ -14,10 +14,15 @@ class FactorModel:
 
         exposures = {}
         r2 = {}
+        factor_X = self.factor_returns.loc[common_dates]
         for stock in stock_returns.columns:
-            y = stock_returns.loc[common_dates, stock].values
-            X = self.factor_returns.loc[common_dates].values
-            model = LinearRegression().fit(X, y)
+            y = stock_returns.loc[common_dates, stock]
+            valid = y.notna()
+            if valid.sum() < 30:
+                continue
+            y_clean = y[valid].values
+            X_clean = factor_X[valid].values
+            model = LinearRegression().fit(X_clean, y_clean)
             exposures[stock] = model.coef_
-            r2[stock] = model.score(X, y)
+            r2[stock] = model.score(X_clean, y_clean)
         return pd.DataFrame(exposures, index=self.factor_returns.columns).T, pd.Series(r2)

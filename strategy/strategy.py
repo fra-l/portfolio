@@ -14,6 +14,7 @@ class FactorReplicationStrategy:
         portfolio,
         decision_engine,
         executor,
+        optimizer=None,
         rebalance_frequency="M",
         lookback_days=252
     ):
@@ -24,10 +25,12 @@ class FactorReplicationStrategy:
         self.portfolio = portfolio
         self.decision_engine = decision_engine
         self.executor = executor
+        self.optimizer = optimizer
         self.rebalance_frequency = rebalance_frequency
         self.lookback_days = lookback_days
 
         self.last_rebalance_date = None
+        self.realized_gains = []
 
     def on_date(self, date):
         if not self._is_rebalance_date(date):
@@ -42,7 +45,7 @@ class FactorReplicationStrategy:
         exposures, r2 = self.factor_model.estimate_exposures(returns)
         universe = self.universe_selector.select(exposures, r2)
         exposures = exposures.loc[universe]
-        current_exposure = self._portfolio_factor_exposure(exposures)
+        current_exposure = self._portfolio_factor_exposure(exposures, date)
         target_exposure = np.array(
             self.target.vector(exposures.columns)
         )
@@ -62,7 +65,7 @@ class FactorReplicationStrategy:
         )
         if not rebalance:
             return
-        self._rebalance_portfolio(universe, date)
+        self._rebalance_portfolio(universe, exposures, date)
         self.last_rebalance_date = date
 
     def _is_rebalance_date(self, date):
@@ -74,7 +77,7 @@ class FactorReplicationStrategy:
     def _lookback_start(self, date):
         return date - pd.Timedelta(days=self.lookback_days)
 
-    def _portfolio_factor_exposure(self, exposures):
+    def _portfolio_factor_exposure(self, exposures, date):
         total_value = 0
         weighted_exposure = np.zeros(exposures.shape[1])
 
@@ -82,7 +85,7 @@ class FactorReplicationStrategy:
             if ticker not in exposures.index:
                 continue
 
-            price = self.market_data.prices[ticker].iloc[-1]
+            price = self.market_data.get_price(ticker, date)
             value = position.total_shares() * price
             total_value += value
 
@@ -101,12 +104,53 @@ class FactorReplicationStrategy:
                 gain += (price - lot.cost_basis) * lot.shares
         return max(gain, 0)
 
-    def _rebalance_portfolio(self, universe, date):
-        allocation = self.portfolio.cash / len(universe)
-        for ticker in universe:
-            self.executor.buy(
-                portfolio=self.portfolio,
-                ticker=ticker,
-                euro_amount=allocation,
-                date=date
+    def _rebalance_portfolio(self, universe, exposures, date):
+        portfolio_value = self.portfolio.market_value(self.market_data, date)
+
+        if self.optimizer is not None:
+            target_allocations = self.optimizer.optimize(
+                exposures=exposures.loc[universe],
+                target_exposures=self.target.target_weights,
+                budget=portfolio_value,
             )
+        else:
+            equal_weight = portfolio_value / len(universe)
+            target_allocations = {ticker: equal_weight for ticker in universe}
+
+        # Sell over-allocated or exited positions first
+        for ticker, position in list(self.portfolio.positions.items()):
+            price = self.market_data.get_price(ticker, date)
+            current_value = position.total_shares() * price
+            target_value = target_allocations.get(ticker, 0.0)
+
+            if current_value > target_value + 1e-6:
+                shares_to_sell = (current_value - target_value) / price
+                result = self.executor.sell(
+                    portfolio=self.portfolio,
+                    ticker=ticker,
+                    shares=shares_to_sell,
+                    date=date,
+                )
+                self.realized_gains.append({
+                    "date": date,
+                    "ticker": ticker,
+                    "realized_gain": result["realized_gain"],
+                    "proceeds": result["proceeds"],
+                })
+
+        # Buy under-allocated positions using available cash
+        for ticker in universe:
+            price = self.market_data.get_price(ticker, date)
+            current_value = 0.0
+            if ticker in self.portfolio.positions:
+                current_value = self.portfolio.positions[ticker].total_shares() * price
+
+            shortfall = target_allocations.get(ticker, 0.0) - current_value
+            buy_amount = min(shortfall, self.portfolio.cash)
+            if buy_amount > 1e-6:
+                self.executor.buy(
+                    portfolio=self.portfolio,
+                    ticker=ticker,
+                    euro_amount=buy_amount,
+                    date=date,
+                )

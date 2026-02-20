@@ -8,4 +8,11 @@ class Executor:
         price = self.market_data.get_price(ticker, date)
         shares = euro_amount / price
         portfolio.cash -= euro_amount
-        portfolio.add_position(ticker, Lot(shares, price))
+        portfolio.add_position(ticker, Lot(shares, price, purchase_date=date))
+
+    def sell(self, portfolio, ticker, shares, date, method="HIFO"):
+        price = self.market_data.get_price(ticker, date)
+        position = portfolio.positions[ticker]
+        result = position.sell_shares(shares, price, method=method)
+        portfolio.cash += result["proceeds"]
+        return result
