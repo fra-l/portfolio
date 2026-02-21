@@ -38,6 +38,7 @@ class FactorReplicationStrategy:
         self.last_rebalance_date = None
         self.realized_gains = []
         self.total_interest_paid = 0.0
+        self.exposure_history = []  # list of {date, exposure, factors} snapshots
 
     def on_date(self, date):
         # Margin: daily interest accrual and margin-call check (every day)
@@ -86,6 +87,12 @@ class FactorReplicationStrategy:
         universe = self.universe_selector.select(exposures, r2, volatility=volatility)
         exposures = exposures.loc[universe]
         current_exposure = self._portfolio_factor_exposure(exposures, date)
+        # Snapshot portfolio factor exposure on every rebalance date
+        self.exposure_history.append({
+            "date": date,
+            "exposure": current_exposure.tolist(),
+            "factors": list(exposures.columns),
+        })
         target_exposure = np.array(
             self.target.vector(exposures.columns)
         )

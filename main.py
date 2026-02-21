@@ -136,9 +136,23 @@ def main():
     print(f"    {'Cash':<14}  {'':>17}   €{portfolio.cash:>10,.2f}")
     print(f"{'='*52}")
 
+    from reporting.performance_metrics import compute_all_metrics, write_summary_report
+    metrics = compute_all_metrics(
+        history=backtest.history,
+        trades=executor.trades,
+        spy_prices=spy_prices,
+        initial_value=initial_value,
+    )
+    write_summary_report(metrics, output_path="reports/summary.txt")
+
     from reporting.charts import plot_results
-    plot_results(history=backtest.history, trades=executor.trades,
-                 spy_prices=spy_prices, initial_value=initial_value)
+    plot_results(
+        history=backtest.history,
+        trades=executor.trades,
+        spy_prices=spy_prices,
+        initial_value=initial_value,
+        exposure_history=strategy.exposure_history,
+    )
 
 
 if __name__ == "__main__":

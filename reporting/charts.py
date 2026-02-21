@@ -164,7 +164,37 @@ def _plot_allocation_over_time(alloc_pct, output_path):
     return fig
 
 
-def plot_results(history, trades, spy_prices, initial_value):
+def _plot_rolling_factor_exposures(exposure_history, output_path):
+    if not exposure_history:
+        return None
+
+    rows = []
+    for snap in exposure_history:
+        row = {"date": snap["date"]}
+        for factor, val in zip(snap["factors"], snap["exposure"]):
+            row[factor] = val
+        rows.append(row)
+    df = pd.DataFrame(rows).set_index("date")
+
+    fig, ax = plt.subplots(figsize=(12, 5))
+    colors = ["#2196F3", "#4CAF50", "#FF9800", "#9C27B0", "#F44336"]
+    for i, col in enumerate(df.columns):
+        ax.plot(df.index, df[col], label=col,
+                linewidth=1.5, color=colors[i % len(colors)],
+                marker="o", markersize=3)
+
+    ax.axhline(0, color="black", linewidth=0.5, linestyle="--", alpha=0.4)
+    ax.set_title("Rolling Portfolio Factor Exposures (at Each Rebalance)")
+    ax.set_xlabel("Date")
+    ax.set_ylabel("Factor Exposure")
+    ax.legend(loc="upper left")
+    ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=150)
+    return fig
+
+
+def plot_results(history, trades, spy_prices, initial_value, exposure_history=None):
     os.makedirs("reports", exist_ok=True)
 
     history_df = _build_history_df(history)
@@ -181,6 +211,10 @@ def plot_results(history, trades, spy_prices, initial_value):
                            leverage_series=leverage_series)
     _plot_trade_activity(trades_df, "reports/trade_activity.png")
     _plot_allocation_over_time(alloc_pct, "reports/allocation_over_time.png")
+    if exposure_history:
+        _plot_rolling_factor_exposures(
+            exposure_history, "reports/rolling_factor_exposures.png"
+        )
 
     print("\nCharts saved to reports/")
     plt.show()
