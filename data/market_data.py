@@ -58,7 +58,11 @@ class MarketData:
         self.returns = returns
 
     def get_price(self, ticker, date):
-        return self.prices.loc[date, ticker]
+        price = self.prices.loc[date, ticker]
+        if pd.isna(price):
+            prior = self.prices[ticker].loc[:date].dropna()
+            return float(prior.iloc[-1]) if not prior.empty else 0.0
+        return price
 
     def get_returns(self, tickers, start, end):
         return self.returns.loc[start:end, tickers]
@@ -75,6 +79,7 @@ class MarketData:
         prices_full = raw["Close"] if len(download_tickers) > 1 else raw["Close"].to_frame(download_tickers[0])
         prices_full = prices_full.dropna(how="all")
         prices_full.index = prices_full.index.tz_localize(None)
+        prices_full = prices_full.ffill()  # fill per-ticker gaps with last known price
 
         # Extract SPY and drop from portfolio prices
         spy_prices_full = prices_full["SPY"].copy()
