@@ -68,13 +68,30 @@ class MarketData:
         return self.returns.loc[start:end, tickers]
 
     @classmethod
-    def from_tickers(cls, tickers, start="2020-01-01", end=None, lookback_days=252):
+    def from_tickers(cls, tickers, start="2020-01-01", end=None, lookback_days=252,
+                     benchmark_tickers=None):
+        """
+        Download prices and factor returns.
+
+        Parameters
+        ----------
+        benchmark_tickers : list[str] | None
+            Yahoo Finance tickers to use as benchmarks (default: ["SPY"]).
+
+        Returns
+        -------
+        (MarketData, factor_returns_df, benchmark_prices)
+            benchmark_prices is a dict {ticker: pd.Series} trimmed to [start, end].
+        """
+        if benchmark_tickers is None:
+            benchmark_tickers = ["SPY"]
+
         # Download extra history so the lookback window is fully populated
         # from the very first backtest date.
         warmup_start = (pd.Timestamp(start) - pd.Timedelta(days=lookback_days + 60)).strftime("%Y-%m-%d")
 
-        # Include SPY for benchmark comparison; extract and remove before constructing MarketData
-        download_tickers = list(tickers) + ["SPY"]
+        # Include benchmark tickers in the download; extract them afterwards
+        download_tickers = list(tickers) + [t for t in benchmark_tickers if t not in tickers]
         print(f"  Downloading prices for {len(download_tickers)} tickers from {warmup_start}...", flush=True)
         raw = yf.download(download_tickers, start=warmup_start, end=end, auto_adjust=True, progress=False)
         prices_full = raw["Close"] if len(download_tickers) > 1 else raw["Close"].to_frame(download_tickers[0])
@@ -82,14 +99,19 @@ class MarketData:
         prices_full.index = prices_full.index.tz_localize(None)
         prices_full = prices_full.ffill()  # fill per-ticker gaps with last known price
 
-        # Extract SPY and drop from portfolio prices
-        spy_prices_full = prices_full["SPY"].copy()
-        prices_full = prices_full.drop(columns=["SPY"])
+        # Extract benchmark series and remove from portfolio prices
+        benchmark_prices_full = {}
+        for bt in benchmark_tickers:
+            if bt in prices_full.columns:
+                benchmark_prices_full[bt] = prices_full[bt].copy()
+        prices_full = prices_full.drop(
+            columns=[t for t in benchmark_tickers if t in prices_full.columns and t not in tickers]
+        )
 
         # Compute returns over the full history (needed for lookback)
         returns_full = prices_full.pct_change().dropna(how="all")
 
-        print(f"  Loaded {prices_full.shape[1] - 1} tickers × {prices_full.shape[0]} days", flush=True)
+        print(f"  Loaded {prices_full.shape[1]} tickers × {prices_full.shape[0]} days", flush=True)
         # Download Fama-French daily factors (Value = HML, Momentum = UMD)
         print("  Downloading Fama-French factors...", flush=True)
         ff = _fetch_ff_csv(_FF_FACTORS_URL, warmup_start, end)
@@ -111,7 +133,10 @@ class MarketData:
         start_ts = pd.Timestamp(start)
         prices = prices_full.loc[prices_full.index >= start_ts]
 
-        # SPY trimmed to backtest start date
-        spy_prices = spy_prices_full.loc[spy_prices_full.index >= start_ts]
+        # Trim benchmark series to backtest start date
+        benchmark_prices = {
+            ticker: series.loc[series.index >= start_ts]
+            for ticker, series in benchmark_prices_full.items()
+        }
 
-        return cls(prices, returns_full), factor_returns, spy_prices
+        return cls(prices, returns_full), factor_returns, benchmark_prices

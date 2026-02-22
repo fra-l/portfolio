@@ -49,6 +49,8 @@ class BacktestConfig:
     rebalance_frequency: str = "M"
     # Portfolio
     initial_cash: float = 20_000.0
+    # Benchmarks — any Yahoo Finance ticker(s) to compare against; first is the primary
+    benchmark_tickers: list = field(default_factory=lambda: ["SPY"])
     # Sub-configs (use defaults if not set)
     tax_config: TaxConfig = field(default_factory=TaxConfig)
     trading_cost_config: TradingCostConfig = field(default_factory=TradingCostConfig)

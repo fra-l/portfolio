@@ -135,10 +135,16 @@ def average_monthly_turnover(trades: list, history: list) -> float:
 def compute_all_metrics(
     history: list,
     trades: list,
-    spy_prices: pd.Series,
+    benchmark_prices,   # dict[str, pd.Series] or a bare pd.Series (legacy)
     initial_value: float,
 ) -> dict:
-    """Compute all performance metrics and return as a dict."""
+    """
+    Compute all performance metrics and return as a dict.
+
+    benchmark_prices can be:
+      - dict[str, pd.Series]  — one entry per benchmark ticker (preferred)
+      - pd.Series             — treated as {"SPY": series} for backward compat
+    """
     if not history:
         return {}
     history_df = pd.DataFrame(
@@ -148,17 +154,18 @@ def compute_all_metrics(
     if len(values) < 2:
         return {}
 
+    # Normalise benchmark_prices to a dict
+    if isinstance(benchmark_prices, pd.Series):
+        benchmark_prices = {"SPY": benchmark_prices}
+    if benchmark_prices is None:
+        benchmark_prices = {}
+
     portfolio_returns = values.pct_change().dropna()
-    spy = spy_prices.dropna().reindex(values.index, method="ffill").dropna()
-    spy_returns = spy.pct_change().dropna()
 
     sharpe = sharpe_ratio(portfolio_returns)
     sortino = sortino_ratio(portfolio_returns)
     mdd = max_drawdown(values)
     dd_dur = drawdown_duration(values)
-    ann_alpha, beta = alpha_beta(portfolio_returns, spy_returns)
-    ir = information_ratio(portfolio_returns, spy_returns)
-    te = annualized_tracking_error(portfolio_returns, spy_returns)
     turnover = average_monthly_turnover(trades, history)
 
     years = (values.index[-1] - values.index[0]).days / 365.25
@@ -167,17 +174,29 @@ def compute_all_metrics(
         if years > 0 else 0.0
     )
 
+    # Per-benchmark relative metrics
+    per_benchmark = {}
+    for ticker, bm_series in benchmark_prices.items():
+        bm = bm_series.dropna().reindex(values.index, method="ffill").dropna()
+        bm_returns = bm.pct_change().dropna()
+        ann_alpha, beta = alpha_beta(portfolio_returns, bm_returns)
+        ir = information_ratio(portfolio_returns, bm_returns)
+        te = annualized_tracking_error(portfolio_returns, bm_returns)
+        per_benchmark[ticker] = {
+            "alpha_annualized": ann_alpha,
+            "beta": beta,
+            "information_ratio": ir,
+            "annualized_tracking_error_pct": te * 100,
+        }
+
     return {
         "annualized_return_pct": ann_return,
         "sharpe_ratio": sharpe,
         "sortino_ratio": sortino,
         "max_drawdown_pct": mdd * 100,
         "max_drawdown_duration_days": dd_dur,
-        "alpha_annualized": ann_alpha,
-        "beta": beta,
-        "information_ratio": ir,
-        "annualized_tracking_error_pct": te * 100,
         "avg_monthly_turnover_pct": turnover * 100,
+        "per_benchmark": per_benchmark,
     }
 
 
@@ -204,16 +223,22 @@ def write_summary_report(metrics: dict, output_path: str = "reports/summary.txt"
         f"  Max drawdown:          {_fmt(metrics.get('max_drawdown_pct', float('nan')), suffix='%')}",
         f"  Drawdown duration:     {metrics.get('max_drawdown_duration_days', 0)} days",
         "",
-        "  --- Benchmark-relative (vs SPY) ---",
-        f"  Alpha (annualized):    {_fmt(metrics.get('alpha_annualized', float('nan')), sign=True, decimals=4)}",
-        f"  Beta:                  {_fmt(metrics.get('beta', float('nan')), sign=True, decimals=3)}",
-        f"  Information ratio:     {_fmt(metrics.get('information_ratio', float('nan')), sign=True)}",
-        f"  Tracking error (ann.): {_fmt(metrics.get('annualized_tracking_error_pct', float('nan')), suffix='%')}",
-        "",
         "  --- Turnover ---",
         f"  Avg monthly turnover:  {_fmt(metrics.get('avg_monthly_turnover_pct', float('nan')), suffix='%')}",
-        "=" * 52,
     ]
+
+    per_benchmark = metrics.get("per_benchmark", {})
+    for ticker, bm in per_benchmark.items():
+        lines += [
+            "",
+            f"  --- Benchmark-relative (vs {ticker}) ---",
+            f"  Alpha (annualized):    {_fmt(bm.get('alpha_annualized', float('nan')), sign=True, decimals=4)}",
+            f"  Beta:                  {_fmt(bm.get('beta', float('nan')), sign=True, decimals=3)}",
+            f"  Information ratio:     {_fmt(bm.get('information_ratio', float('nan')), sign=True)}",
+            f"  Tracking error (ann.): {_fmt(bm.get('annualized_tracking_error_pct', float('nan')), suffix='%')}",
+        ]
+
+    lines.append("=" * 52)
     with open(output_path, "w") as f:
         f.write("\n".join(lines) + "\n")
     print(f"\nPerformance summary written to {output_path}")

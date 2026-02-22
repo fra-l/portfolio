@@ -30,8 +30,8 @@ def run_backtest(config: BacktestConfig) -> dict:
         min_adv=config.min_adv,
     )
     print(f"  {len(tickers)} tickers selected")
-    market_data, factor_returns, spy_prices = MarketData.from_tickers(
-        tickers, start=config.start
+    market_data, factor_returns, benchmark_prices = MarketData.from_tickers(
+        tickers, start=config.start, benchmark_tickers=config.benchmark_tickers
     )
 
     # 2. Model initialisation
@@ -89,7 +89,7 @@ def run_backtest(config: BacktestConfig) -> dict:
     metrics = compute_all_metrics(
         history=backtest.history,
         trades=executor.trades,
-        spy_prices=spy_prices,
+        benchmark_prices=benchmark_prices,
         initial_value=config.initial_cash,
     )
 
@@ -99,7 +99,7 @@ def run_backtest(config: BacktestConfig) -> dict:
     metrics["_portfolio"] = portfolio
     metrics["_market_data"] = market_data
     metrics["_executor"] = executor
-    metrics["_spy_prices"] = spy_prices
+    metrics["_benchmark_prices"] = benchmark_prices
     metrics["_initial_value"] = config.initial_cash
 
     return metrics
