@@ -31,42 +31,60 @@ def _build_alloc_df(history):
     return pct
 
 
-def _normalize_spy(spy_prices, initial_value):
-    spy = spy_prices.dropna()
-    if spy.empty:
-        return spy
-    return spy / spy.iloc[0] * initial_value
+_BENCHMARK_COLORS = ["#FF9800", "#E91E63", "#9C27B0", "#00BCD4", "#8BC34A", "#FF5722"]
 
 
-def _plot_portfolio_vs_spy(history_df, trades_df, spy_normalized, output_path,
-                           leverage_series=None):
+def _normalize_benchmark(prices, initial_value):
+    s = prices.dropna()
+    if s.empty:
+        return s
+    return s / s.iloc[0] * initial_value
+
+
+def _plot_portfolio_vs_benchmarks(history_df, trades_df, benchmark_prices,
+                                   initial_value, output_path, leverage_series=None):
+    """
+    benchmark_prices : dict[str, pd.Series] — raw (un-normalised) benchmark prices
+    """
+    from matplotlib.lines import Line2D
+
     fig, ax = plt.subplots(figsize=(12, 5))
 
-    ax.plot(history_df.index, history_df["value"], label="Portfolio (€)", color="#2196F3", linewidth=1.5)
-    ax.plot(spy_normalized.index, spy_normalized.values, label="SPY (normalized €)",
-            color="#FF9800", linewidth=1.5, linestyle="--")
+    ax.plot(history_df.index, history_df["value"],
+            label="Portfolio (€)", color="#2196F3", linewidth=1.5)
+
+    for i, (ticker, prices) in enumerate(benchmark_prices.items()):
+        color = _BENCHMARK_COLORS[i % len(_BENCHMARK_COLORS)]
+        normalized = _normalize_benchmark(prices, initial_value)
+        ax.plot(normalized.index, normalized.values,
+                label=f"{ticker} (normalized €)",
+                color=color, linewidth=1.5, linestyle="--")
 
     # Buy markers
     buys = trades_df[trades_df["type"] == "buy"] if not trades_df.empty else pd.DataFrame()
     if not buys.empty:
-        buy_dates = buys["date"].unique()
-        for d in buy_dates:
+        for d in buys["date"].unique():
             if d in history_df.index:
                 ax.scatter(d, history_df.loc[d, "value"], marker="^", color="#4CAF50", s=40, zorder=5)
 
     # Sell markers
     sells = trades_df[trades_df["type"] == "sell"] if not trades_df.empty else pd.DataFrame()
     if not sells.empty:
-        sell_dates = sells["date"].unique()
-        for d in sell_dates:
+        for d in sells["date"].unique():
             if d in history_df.index:
                 ax.scatter(d, history_df.loc[d, "value"], marker="v", color="#F44336", s=40, zorder=5)
 
-    # Legend proxies for markers
-    from matplotlib.lines import Line2D
+    # Legend: portfolio + benchmarks + trade markers
     legend_elements = [
         Line2D([0], [0], color="#2196F3", linewidth=1.5, label="Portfolio (€)"),
-        Line2D([0], [0], color="#FF9800", linewidth=1.5, linestyle="--", label="SPY (normalized €)"),
+    ]
+    for i, ticker in enumerate(benchmark_prices):
+        color = _BENCHMARK_COLORS[i % len(_BENCHMARK_COLORS)]
+        legend_elements.append(
+            Line2D([0], [0], color=color, linewidth=1.5, linestyle="--",
+                   label=f"{ticker} (normalized €)")
+        )
+    legend_elements += [
         Line2D([0], [0], marker="^", color="#4CAF50", linestyle="None", markersize=7, label="Buy"),
         Line2D([0], [0], marker="v", color="#F44336", linestyle="None", markersize=7, label="Sell"),
     ]
@@ -84,7 +102,8 @@ def _plot_portfolio_vs_spy(history_df, trades_df, spy_normalized, output_path,
         ax2.yaxis.set_major_formatter(mticker.FuncFormatter(lambda v, _: f"{v:.2f}×"))
         ax2.set_ylim(bottom=0.9)
 
-    ax.set_title("Portfolio Value vs SPY Benchmark")
+    benchmark_label = " / ".join(benchmark_prices.keys()) if benchmark_prices else "No benchmark"
+    ax.set_title(f"Portfolio Value vs {benchmark_label}")
     ax.set_xlabel("Date")
     ax.set_ylabel("Value (€)")
     ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"€{x:,.0f}"))
@@ -194,21 +213,32 @@ def _plot_rolling_factor_exposures(exposure_history, output_path):
     return fig
 
 
-def plot_results(history, trades, spy_prices, initial_value, exposure_history=None):
+def plot_results(history, trades, benchmark_prices, initial_value, exposure_history=None):
+    """
+    benchmark_prices : dict[str, pd.Series] or pd.Series (legacy SPY-only path)
+    """
     os.makedirs("reports", exist_ok=True)
+
+    # Normalise legacy bare Series to dict
+    if isinstance(benchmark_prices, pd.Series):
+        benchmark_prices = {"SPY": benchmark_prices}
+    if benchmark_prices is None:
+        benchmark_prices = {}
 
     history_df = _build_history_df(history)
     trades_df = _build_trades_df(trades)
     alloc_pct = _build_alloc_df(history)
-    spy_norm = _normalize_spy(spy_prices, initial_value)
 
     leverage_series = None
     if history and "leverage" in history[0]:
         lev_rows = [{"date": h["date"], "leverage": h["leverage"]} for h in history]
         leverage_series = pd.DataFrame(lev_rows).set_index("date")["leverage"]
 
-    _plot_portfolio_vs_spy(history_df, trades_df, spy_norm, "reports/portfolio_vs_spy.png",
-                           leverage_series=leverage_series)
+    _plot_portfolio_vs_benchmarks(
+        history_df, trades_df, benchmark_prices, initial_value,
+        "reports/portfolio_vs_benchmarks.png",
+        leverage_series=leverage_series,
+    )
     _plot_trade_activity(trades_df, "reports/trade_activity.png")
     _plot_allocation_over_time(alloc_pct, "reports/allocation_over_time.png")
     if exposure_history:
