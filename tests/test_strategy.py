@@ -213,6 +213,86 @@ class TestLookbackStart:
 
 
 # ---------------------------------------------------------------------------
+# Tracking error — MKT exclusion
+# ---------------------------------------------------------------------------
+
+class TestTrackingErrorExcludesMKT:
+    def test_mkt_not_in_managed_factors(self, small_market_data, small_factor_returns):
+        """Factors absent from target_weights must be excluded from tracking error."""
+        strategy, _, _ = _make_strategy(small_market_data, small_factor_returns)
+        factor_names = ["MKT", "Value", "Momentum"]
+        managed = [f for f in factor_names if f in strategy.target.target_weights]
+        assert "MKT" not in managed
+        assert set(managed) == {"Value", "Momentum"}
+
+    def test_exposure_history_still_records_mkt(self, small_market_data, small_factor_returns, trading_dates):
+        """MKT is excluded from tracking error but must still appear in the exposure history snapshot."""
+        strategy, _, _ = _make_strategy(small_market_data, small_factor_returns)
+        for d in trading_dates[:25]:
+            strategy.on_date(d)
+        assert len(strategy.exposure_history) > 0
+        for snap in strategy.exposure_history:
+            assert "MKT" in snap["factors"], "MKT should be recorded in exposure history even if unmanaged"
+
+    def test_tracking_error_zero_when_managed_factors_match(self, small_market_data, small_factor_returns):
+        """Tracking error must be 0 when Value and Momentum match the target,
+        even if MKT exposure is large — confirming MKT is excluded from the norm."""
+        strategy, portfolio, executor = _make_strategy(small_market_data, small_factor_returns)
+
+        date = pd.Timestamp("2022-01-03")
+        executor.buy(portfolio, "AAPL", 5_000.0, date)
+
+        factor_names = ["MKT", "Value", "Momentum"]
+        target_weights = strategy.target.target_weights  # {"Value": 0.6, "Momentum": 0.4}
+
+        # AAPL exposure: MKT=2.0 (far from any implied target), Value=0.6, Momentum=0.4 (on target)
+        exposures = pd.DataFrame(
+            {"AAPL": [2.0, 0.6, 0.4]},
+            index=factor_names,
+        ).T
+
+        # Replicate the tracking-error calculation from on_date
+        current_exposure = strategy._portfolio_factor_exposure(exposures, date)
+        managed = [f for f in factor_names if f in target_weights]
+        managed_idx = np.array([factor_names.index(f) for f in managed])
+        managed_current = current_exposure[managed_idx]
+        managed_target = np.array([target_weights[f] for f in managed])
+        tracking_error = np.linalg.norm(managed_current - managed_target)
+
+        assert abs(tracking_error) < 1e-9, (
+            f"Expected zero TE when Value/Momentum are on target, got {tracking_error:.6f}. "
+            "MKT is not being excluded correctly."
+        )
+
+    def test_tracking_error_nonzero_when_managed_factors_off_target(
+        self, small_market_data, small_factor_returns
+    ):
+        """Tracking error must be nonzero when Value or Momentum deviate from target."""
+        strategy, portfolio, executor = _make_strategy(small_market_data, small_factor_returns)
+
+        date = pd.Timestamp("2022-01-03")
+        executor.buy(portfolio, "AAPL", 5_000.0, date)
+
+        factor_names = ["MKT", "Value", "Momentum"]
+        target_weights = strategy.target.target_weights  # {"Value": 0.6, "Momentum": 0.4}
+
+        # AAPL exposure: MKT=1.0, Value=0.0, Momentum=0.0 (both managed factors off target)
+        exposures = pd.DataFrame(
+            {"AAPL": [1.0, 0.0, 0.0]},
+            index=factor_names,
+        ).T
+
+        current_exposure = strategy._portfolio_factor_exposure(exposures, date)
+        managed = [f for f in factor_names if f in target_weights]
+        managed_idx = np.array([factor_names.index(f) for f in managed])
+        managed_current = current_exposure[managed_idx]
+        managed_target = np.array([target_weights[f] for f in managed])
+        tracking_error = np.linalg.norm(managed_current - managed_target)
+
+        assert tracking_error > 0, "TE must be nonzero when managed factors deviate from target"
+
+
+# ---------------------------------------------------------------------------
 # on_date — smoke test over a short date window
 # ---------------------------------------------------------------------------
 

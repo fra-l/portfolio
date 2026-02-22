@@ -87,18 +87,23 @@ class FactorReplicationStrategy:
         universe = self.universe_selector.select(exposures, r2, volatility=volatility)
         exposures = exposures.loc[universe]
         current_exposure = self._portfolio_factor_exposure(exposures, date)
-        # Snapshot portfolio factor exposure on every rebalance date
+        # Snapshot portfolio factor exposure on every rebalance date (all factors)
         self.exposure_history.append({
             "date": date,
             "exposure": current_exposure.tolist(),
             "factors": list(exposures.columns),
         })
-        target_exposure = np.array(
-            self.target.vector(exposures.columns)
-        )
-        tracking_error = np.linalg.norm(
-            current_exposure - target_exposure
-        )
+        # Tracking error is computed only over factors explicitly managed by the
+        # target (e.g. Value, Momentum).  Un-managed factors such as MKT are
+        # excluded: because we never set a MKT target, including it would
+        # introduce a permanent, irrecoverable tracking-error component that the
+        # strategy can never close.
+        factor_names = list(exposures.columns)
+        managed = [f for f in factor_names if f in self.target.target_weights]
+        managed_idx = np.array([factor_names.index(f) for f in managed])
+        managed_current = current_exposure[managed_idx]
+        managed_target = np.array([self.target.target_weights[f] for f in managed])
+        tracking_error = np.linalg.norm(managed_current - managed_target)
         unrealized_gain = self._estimate_unrealized_gains(date)
         portfolio_value = self.portfolio.market_value(
             self.market_data,
