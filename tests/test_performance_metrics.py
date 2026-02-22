@@ -295,14 +295,17 @@ class TestComputeAllMetrics:
     def test_expected_keys_present(self, small_spy_prices, trading_dates):
         history = [{"date": d, "value": 20_000.0 + i} for i, d in enumerate(trading_dates[:200])]
         metrics = compute_all_metrics(history, [], small_spy_prices, 20_000.0)
-        expected_keys = [
+        top_level_keys = [
             "annualized_return_pct", "sharpe_ratio", "sortino_ratio",
             "max_drawdown_pct", "max_drawdown_duration_days",
-            "alpha_annualized", "beta", "information_ratio",
-            "annualized_tracking_error_pct", "avg_monthly_turnover_pct",
+            "avg_monthly_turnover_pct", "per_benchmark",
         ]
-        for key in expected_keys:
+        for key in top_level_keys:
             assert key in metrics, f"Missing key: {key}"
+        # Benchmark-relative metrics live under per_benchmark["SPY"]
+        bm = metrics["per_benchmark"].get("SPY", {})
+        for key in ["alpha_annualized", "beta", "information_ratio", "annualized_tracking_error_pct"]:
+            assert key in bm, f"Missing per-benchmark key: {key}"
 
     def test_empty_history_returns_empty_dict(self, small_spy_prices):
         result = compute_all_metrics([], [], small_spy_prices, 20_000.0)
@@ -356,11 +359,15 @@ class TestWriteSummaryReport:
             "sortino_ratio": float("inf"),
             "max_drawdown_pct": 0.0,
             "max_drawdown_duration_days": 0,
-            "alpha_annualized": float("nan"),
-            "beta": float("nan"),
-            "information_ratio": float("nan"),
-            "annualized_tracking_error_pct": float("nan"),
             "avg_monthly_turnover_pct": 0.0,
+            "per_benchmark": {
+                "SPY": {
+                    "alpha_annualized": float("nan"),
+                    "beta": float("nan"),
+                    "information_ratio": float("nan"),
+                    "annualized_tracking_error_pct": float("nan"),
+                }
+            },
         }
         out = str(tmp_path / "summary_nan.txt")
         write_summary_report(metrics, output_path=out)  # must not raise
@@ -373,11 +380,15 @@ class TestWriteSummaryReport:
             "sortino_ratio": 1.5,
             "max_drawdown_pct": 10.0,
             "max_drawdown_duration_days": 30,
-            "alpha_annualized": 0.01,
-            "beta": 0.95,
-            "information_ratio": 0.5,
-            "annualized_tracking_error_pct": 3.0,
             "avg_monthly_turnover_pct": 2.0,
+            "per_benchmark": {
+                "SPY": {
+                    "alpha_annualized": 0.01,
+                    "beta": 0.95,
+                    "information_ratio": 0.5,
+                    "annualized_tracking_error_pct": 3.0,
+                }
+            },
         }
         nested = str(tmp_path / "nested" / "dir" / "summary.txt")
         write_summary_report(metrics, output_path=nested)
