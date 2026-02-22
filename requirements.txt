@@ -6,3 +6,5 @@ yfinance
 requests
 matplotlib
 pytest
+paramiko
+optuna
