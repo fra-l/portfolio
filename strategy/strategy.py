@@ -125,6 +125,7 @@ class FactorReplicationStrategy:
 
         self._rebalance_portfolio(universe, exposures, date)
         self.last_rebalance_date = date
+        print(f"    [rebalance] {date.date()}  universe={len(universe)}  TE={tracking_error:.3f}  value=€{portfolio_value:,.0f}", flush=True)
 
         # Repay any margin balance that can be covered by spare cash
         if self.margin_config is not None and self.margin_config.enabled \

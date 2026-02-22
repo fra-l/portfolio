@@ -75,6 +75,7 @@ class MarketData:
 
         # Include SPY for benchmark comparison; extract and remove before constructing MarketData
         download_tickers = list(tickers) + ["SPY"]
+        print(f"  Downloading prices for {len(download_tickers)} tickers from {warmup_start}...", flush=True)
         raw = yf.download(download_tickers, start=warmup_start, end=end, auto_adjust=True, progress=False)
         prices_full = raw["Close"] if len(download_tickers) > 1 else raw["Close"].to_frame(download_tickers[0])
         prices_full = prices_full.dropna(how="all")
@@ -88,7 +89,9 @@ class MarketData:
         # Compute returns over the full history (needed for lookback)
         returns_full = prices_full.pct_change().dropna(how="all")
 
+        print(f"  Loaded {prices_full.shape[1] - 1} tickers × {prices_full.shape[0]} days", flush=True)
         # Download Fama-French daily factors (Value = HML, Momentum = UMD)
+        print("  Downloading Fama-French factors...", flush=True)
         ff = _fetch_ff_csv(_FF_FACTORS_URL, warmup_start, end)
         mom = _fetch_ff_csv(_FF_MOMENTUM_URL, warmup_start, end)
 

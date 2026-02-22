@@ -6,7 +6,11 @@ class BacktestEngine:
 
     def run(self, dates):
         market_data = self.strategy.market_data
+        current_year = None
         for d in dates:
+            if d.year != current_year:
+                current_year = d.year
+                print(f"  {current_year}...", flush=True)
             self.strategy.on_date(d)
             value = self.portfolio.market_value(market_data, d)
             leverage = self.portfolio.leverage_ratio(market_data, d)

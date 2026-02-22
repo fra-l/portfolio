@@ -23,17 +23,20 @@ def main():
     # --------------------------------------------------
     # 1. Load data (NO logic here)
     # --------------------------------------------------
+    print("Selecting ticker universe...")
     ticker_universe = TickerUniverse()
     tickers = ticker_universe.select(
         regions=["US", "Europe", "Asia-Pacific"],
         cap_tiers=["mega", "large"],
         min_adv=1e8,
     )
+    print(f"  {len(tickers)} tickers selected")
     market_data, factor_returns, spy_prices = MarketData.from_tickers(tickers, start="2020-01-01")
 
     # --------------------------------------------------
     # 2. Initialize models
     # --------------------------------------------------
+    print("Initializing models...")
     factor_model = FactorModel(factor_returns)
     universe_selector = UniverseSelector(min_r2=0.3)
 
@@ -91,6 +94,10 @@ def main():
         strategy=strategy
     )
 
+    n_days = len(market_data.prices.index)
+    start_date = market_data.prices.index[0].date()
+    end_date = market_data.prices.index[-1].date()
+    print(f"\nRunning backtest  ({start_date} → {end_date},  {n_days} trading days)")
     backtest.run(market_data.prices.index)
 
     # --------------------------------------------------
