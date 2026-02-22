@@ -17,6 +17,7 @@ class TaxConfig:
     wash_sale_waiting_days: int = 30        # Days before repurchasing the same ticker
     max_harvest_per_year: float = float("inf")  # Cap on losses harvested annually (€)
 
+
 @dataclass
 class TradingCostConfig:
     pct_cost: float = 0.001
@@ -29,3 +30,26 @@ class MarginConfig:
     annual_rate: float = 0.05
     conviction_threshold: float = 0.8   # min [0,1] conviction score to trigger borrowing
     expected_hold_days: int = 90        # horizon for tax-aware borrow vs. sell comparison
+
+
+@dataclass
+class BacktestConfig:
+    # Data
+    start: str = "2020-01-01"
+    lookback_days: int = 252
+    # Universe
+    regions: list = field(default_factory=lambda: ["US", "Europe", "Asia-Pacific"])
+    cap_tiers: list = field(default_factory=lambda: ["mega", "large"])
+    min_adv: float = 1e8
+    # Factor model
+    min_r2: float = 0.3
+    # Target
+    target_weights: dict = field(default_factory=lambda: {"Value": 0.6, "Momentum": 0.4})
+    # Strategy
+    rebalance_frequency: str = "M"
+    # Portfolio
+    initial_cash: float = 20_000.0
+    # Sub-configs (use defaults if not set)
+    tax_config: TaxConfig = field(default_factory=TaxConfig)
+    trading_cost_config: TradingCostConfig = field(default_factory=TradingCostConfig)
+    margin_config: MarginConfig = field(default_factory=MarginConfig)

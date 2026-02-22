@@ -1,112 +1,27 @@
 # main.py
 
-from config import TaxConfig, TradingCostConfig, MarginConfig
-from trading.margin_cost import MarginCostModel
-from data.market_data import MarketData
-from factors.factor_model import FactorModel
-from universe.universe_selector import UniverseSelector
-from targets.factor_target import FactorTarget
-from portfolio.portfolio import Portfolio
-from tax.tax_engine import TaxEngine
-from decisions.decision_engine import DecisionEngine
-from execution.executor import Executor
-from optimizer.factor_replication_optimizer import FactorReplicationOptimizer
-from backtest.engine import BacktestEngine
-from tax.tax_harvesting import TaxHarvestingEngine
-
-from universe.ticker_universe import TickerUniverse
-from strategy.strategy import FactorReplicationStrategy
+from config import BacktestConfig
+from backtest.runner import run_backtest
 
 
 def main():
+    config = BacktestConfig()
+    metrics = run_backtest(config)
 
     # --------------------------------------------------
-    # 1. Load data (NO logic here)
-    # --------------------------------------------------
-    print("Selecting ticker universe...")
-    ticker_universe = TickerUniverse()
-    tickers = ticker_universe.select(
-        regions=["US", "Europe", "Asia-Pacific"],
-        cap_tiers=["mega", "large"],
-        min_adv=1e8,
-    )
-    print(f"  {len(tickers)} tickers selected")
-    market_data, factor_returns, spy_prices = MarketData.from_tickers(tickers, start="2020-01-01")
-
-    # --------------------------------------------------
-    # 2. Initialize models
-    # --------------------------------------------------
-    print("Initializing models...")
-    factor_model = FactorModel(factor_returns)
-    universe_selector = UniverseSelector(min_r2=0.3)
-
-    target = FactorTarget({
-        "Value": 0.6,
-        "Momentum": 0.4
-    })
-
-    # --------------------------------------------------
-    # 3. Portfolio & infrastructure
-    # --------------------------------------------------
-    portfolio = Portfolio(cash=20_000)
-
-    tax_config = TaxConfig()
-    tax_engine = TaxEngine(config=tax_config)
-    margin_config = MarginConfig()          # enabled=False by default; set enabled=True to use
-    margin_cost_model = MarginCostModel()
-    decision_engine = DecisionEngine(
-        tax_engine=tax_engine,
-        trading_cost_config=TradingCostConfig(),
-        margin_config=margin_config,
-        margin_cost_model=margin_cost_model,
-    )
-
-    executor = Executor(market_data)
-    harvester = TaxHarvestingEngine(
-        config=tax_config,
-        tax_engine=tax_engine,
-        executor=executor,
-    )
-    optimizer = FactorReplicationOptimizer()
-
-    # --------------------------------------------------
-    # 4. Strategy (THIS is the brain)
-    # --------------------------------------------------
-    strategy = FactorReplicationStrategy(
-        market_data=market_data,
-        factor_model=factor_model,
-        universe_selector=universe_selector,
-        target=target,
-        portfolio=portfolio,
-        decision_engine=decision_engine,
-        executor=executor,
-        optimizer=optimizer,
-        harvester=harvester,
-        margin_config=margin_config,
-        margin_cost_model=margin_cost_model,
-    )
-
-    # --------------------------------------------------
-    # 5. Backtest runner
-    # --------------------------------------------------
-    backtest = BacktestEngine(
-        portfolio=portfolio,
-        strategy=strategy
-    )
-
-    n_days = len(market_data.prices.index)
-    start_date = market_data.prices.index[0].date()
-    end_date = market_data.prices.index[-1].date()
-    print(f"\nRunning backtest  ({start_date} → {end_date},  {n_days} trading days)")
-    backtest.run(market_data.prices.index)
-
-    # --------------------------------------------------
-    # 6. Reporting / output
+    # Reporting / output
     # --------------------------------------------------
     import pandas as pd
 
+    backtest = metrics["_backtest"]
+    strategy = metrics["_strategy"]
+    portfolio = metrics["_portfolio"]
+    market_data = metrics["_market_data"]
+    executor = metrics["_executor"]
+    spy_prices = metrics["_spy_prices"]
+    initial_value = metrics["_initial_value"]
+
     history = pd.DataFrame(backtest.history).set_index("date")
-    initial_value = 20_000.0
     final_value = history["value"].iloc[-1]
     total_return_pct = (final_value / initial_value - 1) * 100
     years = (history.index[-1] - history.index[0]).days / 365.25
@@ -143,13 +58,7 @@ def main():
     print(f"    {'Cash':<14}  {'':>17}   €{portfolio.cash:>10,.2f}")
     print(f"{'='*52}")
 
-    from reporting.performance_metrics import compute_all_metrics, write_summary_report
-    metrics = compute_all_metrics(
-        history=backtest.history,
-        trades=executor.trades,
-        spy_prices=spy_prices,
-        initial_value=initial_value,
-    )
+    from reporting.performance_metrics import write_summary_report
     write_summary_report(metrics, output_path="reports/summary.txt")
 
     from reporting.charts import plot_results
