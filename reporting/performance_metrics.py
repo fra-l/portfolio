@@ -139,6 +139,8 @@ def compute_all_metrics(
     initial_value: float,
 ) -> dict:
     """Compute all performance metrics and return as a dict."""
+    if not history:
+        return {}
     history_df = pd.DataFrame(
         [{"date": h["date"], "value": h["value"]} for h in history]
     ).set_index("date")
