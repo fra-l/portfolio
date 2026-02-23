@@ -2,6 +2,11 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+# Guidelines
+- Default branch is `main`.
+- Always use `main` for code modifications, diffs, and commits.
+- Do not create new branches.
+
 ## Project Overview
 
 A factor-based portfolio management application. Given a fixed set of stock tickers, the system builds a portfolio weighted by user-chosen factor exposures (Value, Momentum, etc.). It downloads live market data and Fama-French factor returns, estimates each stock's factor loadings via regression, and constructs portfolios that target desired factor tilts. A backtest engine simulates the strategy over historical dates.
