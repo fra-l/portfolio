@@ -1,10 +1,13 @@
 # strategy.py
 from __future__ import annotations
 
+import logging
 from typing import Any, Optional
 
 import numpy as np
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 
 class FactorReplicationStrategy:
@@ -223,15 +226,30 @@ class FactorReplicationStrategy:
     ) -> None:
         portfolio_value = self.portfolio.market_value(self.market_data, date)
 
+        target_allocations = None
         if self.optimizer is not None:
             target_allocations = self.optimizer.optimize(
                 exposures=exposures.loc[universe],
                 target_exposures=self.target.target_weights,
                 budget=portfolio_value,
             )
-        else:
+            if target_allocations is None:
+                logger.warning(
+                    "[rebalance] %s — optimizer returned None, falling back to equal-weight.",
+                    date,
+                )
+
+        if target_allocations is None:
             equal_weight = portfolio_value / len(universe)
             target_allocations = {ticker: equal_weight for ticker in universe}
+            allocation_method = "equal-weight"
+        else:
+            allocation_method = "optimizer"
+
+        logger.debug(
+            "[rebalance] %s — allocation method: %s, universe size: %d",
+            date, allocation_method, len(universe),
+        )
 
         # Sell over-allocated or exited positions first
         # (or borrow instead if that is cheaper than triggering capital gains tax)
