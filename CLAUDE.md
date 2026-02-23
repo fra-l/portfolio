@@ -59,12 +59,15 @@ Data flows top-to-bottom through `main.py`, which wires all components together.
    - Lot-based tracking enables future tax-efficient selling (HIFO, FIFO, etc.)
 
 6. **Tax Engine** (`tax/tax_engine.py`)
-   - `TaxEngine.tax_due(realized_gain)` — Danish progressive capital gains: 27% on first 10k, 42% above
-   - Hardcodes rates (does not use `config.py` dataclasses)
+   - `TaxEngine.tax_due(realized_gain)` — progressive capital gains using `TaxConfig.brackets`
+   - Default brackets: 27% up to €10k, 42% above (Danish rates)
+   - Accepts `TaxConfig` at construction; defaults to `TaxConfig()` if not provided
 
 7. **Decision Engine** (`decisions/decision_engine.py`)
-   - `DecisionEngine.should_rebalance(tracking_error, unrealized_gain, expected_improvement)`
+   - `DecisionEngine.should_rebalance(tracking_error, unrealized_gain, expected_improvement, trade_value=0.0)`
    - Gate: rebalance only if `expected_improvement > tax_cost + trading_cost`
+   - Trading cost computed as `max(abs(trade_value) * pct_cost, min_cost)` via `TradingCostConfig`
+   - Accepts `TradingCostConfig` at construction; defaults to `TradingCostConfig()` if not provided
    - Note: `tracking_error` parameter is accepted but unused in the cost formula
 
 8. **Executor** (`execution/executor.py`)
@@ -88,9 +91,6 @@ Data flows top-to-bottom through `main.py`, which wires all components together.
 ### Disconnected / Unused Components
 
 - **`optimizer/factor_replication_optimizer.py`** — CVXPY-based optimizer that minimizes `||X.T @ w - target||^2` with constraints `sum(w)=1, w>=0`. Not imported anywhere. The strategy does naive equal-weight instead.
-- **`config.py`** — dataclasses `TaxConfig`, `TradingCostConfig`, `MarginConfig`. None are imported; tax and cost values are hardcoded in their respective modules.
-- **`trading/cost_model.py`** — `TradingCostModel.cost(trade_value, pct_cost, min_cost)`. Never imported; `DecisionEngine` uses a flat `trading_cost=15`.
-- **`models/`** — legacy stubs from an earlier architecture (`models/portfolio.py`, `models/factor_etf.py`). Not used.
 
 ### Known Implementation Gaps
 
@@ -102,10 +102,11 @@ Data flows top-to-bottom through `main.py`, which wires all components together.
 
 ## Configuration
 
-`config.py` defines (currently unused):
-- `TaxConfig`: `lower_rate=0.27`, `upper_rate=0.42`, `threshold=10_000`
-- `TradingCostConfig`: `pct_cost=0.001`, `min_cost=1.0`
-- `MarginConfig`: `enabled=False`, `max_leverage=1.2`, `annual_rate=0.05`
+`config.py` defines:
+- `TaxConfig`: configurable progressive brackets; default: 27% up to €10k, 42% above. Used by `TaxEngine`.
+- `TradingCostConfig`: `pct_cost=0.001`, `min_cost=1.0`. Used by `DecisionEngine`.
+- `MarginConfig`: `enabled=False`, `max_leverage=1.2`, `annual_rate=0.05`. Used by `DecisionEngine` and `FactorReplicationStrategy`.
+- `BacktestConfig`: top-level config aggregating all sub-configs; passed from `runner.py` through the full pipeline.
 
 Tax rates model Danish progressive capital gains: 27% up to 10k, 42% above.
 
@@ -113,7 +114,7 @@ Tax rates model Danish progressive capital gains: 27% up to 10k, 42% above.
 
 - `FactorReplicationStrategy` depends on all other components
 - `Portfolio` -> `Position` -> `Lot` (hierarchical tracking)
-- `DecisionEngine` -> `TaxEngine`
+- `DecisionEngine` -> `TaxEngine` + `TradingCostConfig`
 - `FactorModel` -> `sklearn.linear_model.LinearRegression`
 - `MarketData.from_tickers` -> `yfinance`, `requests` (Fama-French download)
 
