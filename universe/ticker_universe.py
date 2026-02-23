@@ -1,3 +1,7 @@
+import concurrent.futures
+import warnings
+
+import requests
 import yfinance as yf
 import pandas as pd
 
@@ -97,7 +101,7 @@ class TickerUniverse:
     )
     """
 
-    def __init__(self, catalog=None, adv_lookback="3mo"):
+    def __init__(self, catalog=None, adv_lookback="3mo", max_workers=8, request_timeout=30):
         """
         Parameters
         ----------
@@ -106,9 +110,17 @@ class TickerUniverse:
             Defaults to the built-in catalog.
         adv_lookback : str
             yfinance period string used to compute average daily volume (e.g. "3mo", "6mo").
+        max_workers : int
+            Maximum number of threads used to fetch per-ticker fundamentals in parallel.
+            Default is 8.
+        request_timeout : float
+            Seconds to wait for each individual ticker fetch before giving up and emitting
+            a warning.  Default is 30.
         """
         self._df = pd.DataFrame(catalog or _CATALOG)
         self._adv_lookback = adv_lookback
+        self._max_workers = max_workers
+        self._request_timeout = request_timeout
         self._live: pd.DataFrame | None = None  # lazily populated
 
     # ------------------------------------------------------------------
@@ -234,18 +246,65 @@ class TickerUniverse:
     # Private helpers
     # ------------------------------------------------------------------
 
+    def _fetch_one(self, ticker: str) -> dict:
+        """Fetch fundamentals for a single ticker and return a flat dict."""
+        _nan = float("nan")
+        fallback = {
+            "ticker": ticker,
+            "market_cap": 0.0,
+            "pe": _nan,
+            "pb": _nan,
+            "dividend_yield": _nan,
+            "beta": _nan,
+        }
+        try:
+            t = yf.Ticker(ticker)
+            info = t.info
+            mc = t.fast_info.market_cap
+            return {
+                "ticker": ticker,
+                "market_cap": float(mc) if mc else 0.0,
+                "pe":             float(info["trailingPE"])    if info.get("trailingPE")    is not None else _nan,
+                "pb":             float(info["priceToBook"])   if info.get("priceToBook")   is not None else _nan,
+                "dividend_yield": float(info["dividendYield"]) if info.get("dividendYield") is not None else _nan,
+                "beta":           float(info["beta"])          if info.get("beta")          is not None else _nan,
+            }
+        except (KeyError, TypeError, ValueError) as exc:
+            warnings.warn(
+                f"[TickerUniverse] Data parse error for {ticker!r}: {exc!r}",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+        except requests.exceptions.HTTPError as exc:
+            warnings.warn(
+                f"[TickerUniverse] HTTP error fetching {ticker!r}: {exc!r}",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+        except requests.exceptions.RequestException as exc:
+            warnings.warn(
+                f"[TickerUniverse] Network error fetching {ticker!r}: {exc!r}",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+        return fallback
+
     def _ensure_live(self):
         """
-        Fetch market cap and ADV from yfinance for every ticker in the catalog.
-        Results are cached so subsequent calls are instant.
+        Fetch market cap and per-ticker fundamentals from yfinance for every ticker in the
+        catalog, using a thread pool for parallelism.  Results are cached so subsequent
+        calls are instant.
         """
         if self._live is not None:
             return
 
         tickers = self._df["ticker"].tolist()
-        print(f"[TickerUniverse] Fetching live data for {len(tickers)} tickers…")
+        print(
+            f"[TickerUniverse] Fetching live data for {len(tickers)} tickers "
+            f"(max_workers={self._max_workers}, timeout={self._request_timeout}s)…"
+        )
 
-        # --- ADV: bulk price+volume download ---
+        # --- ADV: bulk price+volume download (unchanged — already vectorised) ---
         raw = yf.download(tickers, period=self._adv_lookback,
                           auto_adjust=True, progress=False)
         close = raw["Close"]
@@ -256,34 +315,33 @@ class TickerUniverse:
         dollar_vol = close * volume
         adv = dollar_vol.mean().rename("adv")
 
-        # --- Per-ticker fundamentals: market cap, P/E, P/B, dividend yield, beta ---
-        market_caps, pe_ratios, pb_ratios, dividend_yields, betas = {}, {}, {}, {}, {}
-        for ticker in tickers:
-            try:
-                info = yf.Ticker(ticker).info
-                mc = yf.Ticker(ticker).fast_info.market_cap
-                market_caps[ticker] = float(mc) if mc else 0.0
-                pe  = info.get("trailingPE")
-                pb  = info.get("priceToBook")
-                dy  = info.get("dividendYield")
-                bt  = info.get("beta")
-                pe_ratios[ticker]       = float(pe)  if pe  is not None else float("nan")
-                pb_ratios[ticker]       = float(pb)  if pb  is not None else float("nan")
-                dividend_yields[ticker] = float(dy)  if dy  is not None else float("nan")
-                betas[ticker]           = float(bt)  if bt  is not None else float("nan")
-            except Exception:
-                market_caps[ticker]     = 0.0
-                pe_ratios[ticker]       = float("nan")
-                pb_ratios[ticker]       = float("nan")
-                dividend_yields[ticker] = float("nan")
-                betas[ticker]           = float("nan")
+        # --- Per-ticker fundamentals: parallel fetch ---
+        rows: dict[str, dict] = {}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self._max_workers) as pool:
+            future_to_ticker = {pool.submit(self._fetch_one, t): t for t in tickers}
+            for future in concurrent.futures.as_completed(future_to_ticker):
+                ticker = future_to_ticker[future]
+                try:
+                    rows[ticker] = future.result(timeout=self._request_timeout)
+                except concurrent.futures.TimeoutError:
+                    warnings.warn(
+                        f"[TickerUniverse] Timeout waiting for {ticker!r} "
+                        f"(>{self._request_timeout}s); using NaN fallback.",
+                        RuntimeWarning,
+                        stacklevel=2,
+                    )
+                    rows[ticker] = {
+                        "ticker": ticker,
+                        "market_cap": 0.0,
+                        "pe": float("nan"),
+                        "pb": float("nan"),
+                        "dividend_yield": float("nan"),
+                        "beta": float("nan"),
+                    }
 
-        self._live = pd.concat([
-            pd.Series(market_caps,     name="market_cap"),
-            adv,
-            pd.Series(pe_ratios,       name="pe"),
-            pd.Series(pb_ratios,       name="pb"),
-            pd.Series(dividend_yields, name="dividend_yield"),
-            pd.Series(betas,           name="beta"),
-        ], axis=1)
+        # Preserve catalog order
+        ordered = [rows[t] for t in tickers]
+        fundamentals = pd.DataFrame(ordered).set_index("ticker")
+
+        self._live = pd.concat([fundamentals, adv], axis=1)
         self._live.index.name = "ticker"
