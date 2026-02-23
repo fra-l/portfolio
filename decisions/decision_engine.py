@@ -1,8 +1,18 @@
+from __future__ import annotations
+
+from typing import Any, Optional
+
 from config import TradingCostConfig
 
+
 class DecisionEngine:
-    def __init__(self, tax_engine, trading_cost_config=None,
-                 margin_config=None, margin_cost_model=None):
+    def __init__(
+        self,
+        tax_engine: Any,
+        trading_cost_config: Optional[TradingCostConfig] = None,
+        margin_config: Any = None,
+        margin_cost_model: Any = None,
+    ) -> None:
         self.tax_engine = tax_engine
         if trading_cost_config is None:
             trading_cost_config = TradingCostConfig()
@@ -10,14 +20,25 @@ class DecisionEngine:
         self.margin_config = margin_config
         self.margin_cost_model = margin_cost_model
 
-    def _trading_cost(self, trade_value):
+    def _trading_cost(self, trade_value: float) -> float:
         return max(abs(trade_value) * self.trading_cost_config.pct_cost, self.trading_cost_config.min_cost)
 
-    def should_rebalance(self, tracking_error, unrealized_gain, expected_improvement, trade_value=0.0):
+    def should_rebalance(
+        self,
+        tracking_error: float,
+        unrealized_gain: float,
+        expected_improvement: float,
+        trade_value: float = 0.0,
+    ) -> bool:
         cost = self.tax_engine.tax_due(unrealized_gain) + self._trading_cost(trade_value)
         return expected_improvement > cost
 
-    def should_borrow_instead_of_sell(self, unrealized_gain, sell_amount, expected_hold_days):
+    def should_borrow_instead_of_sell(
+        self,
+        unrealized_gain: float,
+        sell_amount: float,
+        expected_hold_days: int,
+    ) -> bool:
         """
         Return True if the interest cost of borrowing `sell_amount` for `expected_hold_days`
         is less than the capital gains tax that would be triggered by selling.

@@ -1,12 +1,17 @@
+from __future__ import annotations
+
+from typing import Optional
+
 from config import TaxConfig
 
+
 class TaxEngine:
-    def __init__(self, config=None):
+    def __init__(self, config: Optional[TaxConfig] = None) -> None:
         if config is None:
             config = TaxConfig()
         self.config = config
 
-    def tax_due(self, realized_gain):
+    def tax_due(self, realized_gain: float) -> float:
         if realized_gain <= 0:
             return 0.0
         remaining = realized_gain

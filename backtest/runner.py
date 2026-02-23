@@ -1,4 +1,5 @@
 # backtest/runner.py
+from __future__ import annotations
 
 from config import BacktestConfig
 from data.market_data import MarketData

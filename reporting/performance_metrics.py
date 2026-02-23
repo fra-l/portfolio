@@ -7,8 +7,10 @@ Metrics:
   - Alpha, beta, information ratio, annualized tracking error vs benchmark
   - Average monthly turnover
 """
+from __future__ import annotations
 
 import os
+from typing import Union
 
 import numpy as np
 import pandas as pd
@@ -69,7 +71,9 @@ def drawdown_duration(values: pd.Series) -> int:
     return max_duration
 
 
-def alpha_beta(portfolio_returns: pd.Series, benchmark_returns: pd.Series):
+def alpha_beta(
+    portfolio_returns: pd.Series, benchmark_returns: pd.Series
+) -> tuple[float, float]:
     """
     OLS regression of portfolio daily returns on benchmark daily returns.
     Returns (annualized_alpha, beta).
@@ -108,7 +112,7 @@ def annualized_tracking_error(portfolio_returns: pd.Series, benchmark_returns: p
     return float(active.std() * np.sqrt(252))
 
 
-def average_monthly_turnover(trades: list, history: list) -> float:
+def average_monthly_turnover(trades: list[dict], history: list[dict]) -> float:
     """Average monthly turnover as a fraction of portfolio value."""
     if not trades or not history:
         return 0.0
@@ -133,9 +137,9 @@ def average_monthly_turnover(trades: list, history: list) -> float:
 
 
 def compute_all_metrics(
-    history: list,
-    trades: list,
-    benchmark_prices,   # dict[str, pd.Series] or a bare pd.Series (legacy)
+    history: list[dict],
+    trades: list[dict],
+    benchmark_prices: Union[dict[str, pd.Series], pd.Series, None],
     initial_value: float,
 ) -> dict:
     """
@@ -200,7 +204,7 @@ def compute_all_metrics(
     }
 
 
-def _fmt(v, sign=False, decimals=2, suffix=""):
+def _fmt(v: object, sign: bool = False, decimals: int = 2, suffix: str = "") -> str:
     """Format a numeric metric, returning 'N/A' for nan/inf."""
     if not isinstance(v, (int, float)):
         return "N/A"

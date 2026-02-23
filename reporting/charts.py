@@ -1,17 +1,20 @@
+from __future__ import annotations
+
 import os
+from typing import Optional, Union
 
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 import pandas as pd
 
 
-def _build_history_df(history):
+def _build_history_df(history: list[dict]) -> pd.DataFrame:
     df = pd.DataFrame([{"date": h["date"], "value": h["value"]} for h in history])
     df = df.set_index("date")
     return df
 
 
-def _build_trades_df(trades):
+def _build_trades_df(trades: list[dict]) -> pd.DataFrame:
     if not trades:
         return pd.DataFrame(columns=["date", "type", "ticker", "shares", "price", "amount"])
     df = pd.DataFrame(trades)
@@ -19,7 +22,7 @@ def _build_trades_df(trades):
     return df
 
 
-def _build_alloc_df(history):
+def _build_alloc_df(history: list[dict]) -> pd.DataFrame:
     rows = []
     for h in history:
         row = {"date": h["date"]}
@@ -34,15 +37,21 @@ def _build_alloc_df(history):
 _BENCHMARK_COLORS = ["#FF9800", "#E91E63", "#9C27B0", "#00BCD4", "#8BC34A", "#FF5722"]
 
 
-def _normalize_benchmark(prices, initial_value):
+def _normalize_benchmark(prices: pd.Series, initial_value: float) -> pd.Series:
     s = prices.dropna()
     if s.empty:
         return s
     return s / s.iloc[0] * initial_value
 
 
-def _plot_portfolio_vs_benchmarks(history_df, trades_df, benchmark_prices,
-                                   initial_value, output_path, leverage_series=None):
+def _plot_portfolio_vs_benchmarks(
+    history_df: pd.DataFrame,
+    trades_df: pd.DataFrame,
+    benchmark_prices: dict[str, pd.Series],
+    initial_value: float,
+    output_path: str,
+    leverage_series: Optional[pd.Series] = None,
+) -> plt.Figure:
     """
     benchmark_prices : dict[str, pd.Series] — raw (un-normalised) benchmark prices
     """
@@ -113,7 +122,7 @@ def _plot_portfolio_vs_benchmarks(history_df, trades_df, benchmark_prices,
     return fig
 
 
-def _plot_trade_activity(trades_df, output_path):
+def _plot_trade_activity(trades_df: pd.DataFrame, output_path: str) -> plt.Figure:
     fig, ax = plt.subplots(figsize=(12, 5))
 
     if trades_df.empty:
@@ -150,7 +159,7 @@ def _plot_trade_activity(trades_df, output_path):
     return fig
 
 
-def _plot_allocation_over_time(alloc_pct, output_path):
+def _plot_allocation_over_time(alloc_pct: pd.DataFrame, output_path: str) -> plt.Figure:
     fig, ax = plt.subplots(figsize=(12, 5))
 
     # Separate cash column
@@ -183,7 +192,9 @@ def _plot_allocation_over_time(alloc_pct, output_path):
     return fig
 
 
-def _plot_rolling_factor_exposures(exposure_history, output_path):
+def _plot_rolling_factor_exposures(
+    exposure_history: list[dict], output_path: str
+) -> Optional[plt.Figure]:
     if not exposure_history:
         return None
 
@@ -213,9 +224,18 @@ def _plot_rolling_factor_exposures(exposure_history, output_path):
     return fig
 
 
-def plot_results(history, trades, benchmark_prices, initial_value, exposure_history=None):
+def plot_results(
+    history: list[dict],
+    trades: list[dict],
+    benchmark_prices: Union[dict[str, pd.Series], pd.Series, None],
+    initial_value: float,
+    exposure_history: Optional[list[dict]] = None,
+    show: bool = True,
+) -> None:
     """
     benchmark_prices : dict[str, pd.Series] or pd.Series (legacy SPY-only path)
+    show             : if True, call plt.show() after saving charts (default True).
+                       Set to False for headless/CI environments.
     """
     os.makedirs("reports", exist_ok=True)
 
@@ -247,4 +267,5 @@ def plot_results(history, trades, benchmark_prices, initial_value, exposure_hist
         )
 
     print("\nCharts saved to reports/")
-    plt.show()
+    if show:
+        plt.show()

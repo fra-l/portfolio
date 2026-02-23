@@ -1,26 +1,30 @@
 # strategy.py
+from __future__ import annotations
+
+from typing import Any, Optional
 
 import numpy as np
 import pandas as pd
+
 
 class FactorReplicationStrategy:
 
     def __init__(
         self,
-        market_data,
-        factor_model,
-        universe_selector,
-        target,
-        portfolio,
-        decision_engine,
-        executor,
-        optimizer=None,
-        harvester=None,
-        margin_config=None,
-        margin_cost_model=None,
-        rebalance_frequency="M",
-        lookback_days=252
-    ):
+        market_data: Any,
+        factor_model: Any,
+        universe_selector: Any,
+        target: Any,
+        portfolio: Any,
+        decision_engine: Any,
+        executor: Any,
+        optimizer: Optional[Any] = None,
+        harvester: Optional[Any] = None,
+        margin_config: Optional[Any] = None,
+        margin_cost_model: Optional[Any] = None,
+        rebalance_frequency: str = "M",
+        lookback_days: int = 252,
+    ) -> None:
         self.market_data = market_data
         self.factor_model = factor_model
         self.universe_selector = universe_selector
@@ -35,12 +39,12 @@ class FactorReplicationStrategy:
         self.rebalance_frequency = rebalance_frequency
         self.lookback_days = lookback_days
 
-        self.last_rebalance_date = None
-        self.realized_gains = []
-        self.total_interest_paid = 0.0
-        self.exposure_history = []  # list of {date, exposure, factors} snapshots
+        self.last_rebalance_date: Optional[Any] = None
+        self.realized_gains: list[dict] = []
+        self.total_interest_paid: float = 0.0
+        self.exposure_history: list[dict] = []  # list of {date, exposure, factors} snapshots
 
-    def on_date(self, date):
+    def on_date(self, date: Any) -> None:
         # Margin: daily interest accrual and margin-call check (every day)
         if self.margin_config is not None and self.margin_config.enabled \
                 and self.portfolio.margin_balance > 0:
@@ -137,16 +141,16 @@ class FactorReplicationStrategy:
                 and self.portfolio.margin_balance > 0:
             self.executor.repay(self.portfolio, max(self.portfolio.cash, 0.0), date)
 
-    def _is_rebalance_date(self, date):
+    def _is_rebalance_date(self, date: Any) -> bool:
         if self.last_rebalance_date is None:
             return True
         return date.to_period(self.rebalance_frequency) != \
                self.last_rebalance_date.to_period(self.rebalance_frequency)
 
-    def _lookback_start(self, date):
+    def _lookback_start(self, date: Any) -> Any:
         return date - pd.Timedelta(days=self.lookback_days)
 
-    def _portfolio_factor_exposure(self, exposures, date):
+    def _portfolio_factor_exposure(self, exposures: pd.DataFrame, date: Any) -> np.ndarray:
         total_value = 0
         weighted_exposure = np.zeros(exposures.shape[1])
 
@@ -165,14 +169,14 @@ class FactorReplicationStrategy:
 
         return weighted_exposure / total_value
 
-    def _realized_gains_ytd(self, date):
+    def _realized_gains_ytd(self, date: Any) -> float:
         return sum(
             r["realized_gain"]
             for r in self.realized_gains
             if r["date"].year == date.year
         )
 
-    def _estimate_unrealized_gains(self, date):
+    def _estimate_unrealized_gains(self, date: Any) -> float:
         gain = 0
         for ticker, position in self.portfolio.positions.items():
             price = self.market_data.get_price(ticker, date)
@@ -180,7 +184,7 @@ class FactorReplicationStrategy:
                 gain += (price - lot.cost_basis) * lot.shares
         return max(gain, 0)
 
-    def _conviction_score(self, r2_series, tracking_error):
+    def _conviction_score(self, r2_series: Any, tracking_error: float) -> float:
         """
         Score in [0, 1]:  high mean R² (reliable model) × high tracking error
         (large room for improvement). Capped at 1.0.
@@ -189,7 +193,7 @@ class FactorReplicationStrategy:
         te_score = min(tracking_error, 1.0)
         return mean_r2 * te_score
 
-    def _forced_liquidation(self, date):
+    def _forced_liquidation(self, date: Any) -> None:
         """
         Sell the smallest positions (cheapest to unwind) until leverage is
         back within the configured cap, repaying margin from each set of proceeds.
@@ -214,7 +218,9 @@ class FactorReplicationStrategy:
             })
             self.executor.repay(self.portfolio, result["proceeds"], date)
 
-    def _rebalance_portfolio(self, universe, exposures, date):
+    def _rebalance_portfolio(
+        self, universe: list[str], exposures: pd.DataFrame, date: Any
+    ) -> None:
         portfolio_value = self.portfolio.market_value(self.market_data, date)
 
         if self.optimizer is not None:
