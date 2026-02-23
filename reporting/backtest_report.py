@@ -1,4 +1,5 @@
 # reporting/backtest_report.py
+from __future__ import annotations
 
 """
 Prints the human-readable BACKTEST RESULTS block to stdout.

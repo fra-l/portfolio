@@ -1,23 +1,34 @@
+from __future__ import annotations
+
+from typing import Any, Optional
+
+
 class TaxHarvestingEngine:
     """
     Proactively realizes losses to offset capital gains, reducing net tax owed
     under the configured progressive bracket schedule.
     """
 
-    def __init__(self, config, tax_engine, executor):
+    def __init__(self, config: Any, tax_engine: Any, executor: Any) -> None:
         self.config = config
         self.tax_engine = tax_engine
         self.executor = executor
 
-        self._harvested_this_year = 0.0
-        self._current_year = None
-        self.wash_sale_blacklist = {}   # ticker -> date of last harvest sell
+        self._harvested_this_year: float = 0.0
+        self._current_year: Optional[int] = None
+        self.wash_sale_blacklist: dict = {}   # ticker -> date of last harvest sell
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
-    def harvest(self, portfolio, market_data, date, realized_gains_ytd):
+    def harvest(
+        self,
+        portfolio: Any,
+        market_data: Any,
+        date: Any,
+        realized_gains_ytd: float,
+    ) -> list[dict]:
         """
         Scan all positions for harvestable losses and execute sells.
 
@@ -105,7 +116,7 @@ class TaxHarvestingEngine:
 
         return records
 
-    def is_wash_sale_blocked(self, ticker, date):
+    def is_wash_sale_blocked(self, ticker: str, date: Any) -> bool:
         """Return True if ticker was recently harvested and is in the waiting window."""
         if ticker not in self.wash_sale_blacklist:
             return False
@@ -116,12 +127,14 @@ class TaxHarvestingEngine:
     # Private helpers
     # ------------------------------------------------------------------
 
-    def _reset_annual_if_needed(self, date):
+    def _reset_annual_if_needed(self, date: Any) -> None:
         if self._current_year != date.year:
             self._harvested_this_year = 0.0
             self._current_year = date.year
 
-    def _shares_for_target_loss(self, position, current_price, target_loss):
+    def _shares_for_target_loss(
+        self, position: Any, current_price: float, target_loss: float
+    ) -> float:
         """
         Compute the minimum shares to sell (HIFO order — highest cost basis first,
         same as executor default) to realize `target_loss` (positive magnitude).
@@ -146,7 +159,7 @@ class TaxHarvestingEngine:
 
         return shares_to_sell
 
-    def _tax_saved(self, realized_loss, realized_gains_ytd):
+    def _tax_saved(self, realized_loss: float, realized_gains_ytd: float) -> float:
         """Tax reduction from offsetting `realized_loss` against `realized_gains_ytd`."""
         before = self.tax_engine.tax_due(realized_gains_ytd)
         after = self.tax_engine.tax_due(max(0.0, realized_gains_ytd - realized_loss))

@@ -1,10 +1,15 @@
+from __future__ import annotations
+
+from typing import Any
+
+
 class BacktestEngine:
-    def __init__(self, portfolio, strategy):
+    def __init__(self, portfolio: Any, strategy: Any) -> None:
         self.portfolio = portfolio
         self.strategy = strategy
-        self.history = []
+        self.history: list[dict] = []
 
-    def run(self, dates):
+    def run(self, dates: Any) -> None:
         market_data = self.strategy.market_data
         current_year = None
         for d in dates:

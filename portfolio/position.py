@@ -1,12 +1,15 @@
-class Position:
-    def __init__(self, ticker):
-        self.ticker = ticker
-        self.lots = []
+from __future__ import annotations
 
-    def total_shares(self):
+
+class Position:
+    def __init__(self, ticker: str) -> None:
+        self.ticker = ticker
+        self.lots: list = []
+
+    def total_shares(self) -> float:
         return sum(l.shares for l in self.lots)
 
-    def sell_shares(self, shares, current_price, method="HIFO"):
+    def sell_shares(self, shares: float, current_price: float, method: str = "HIFO") -> dict:
         if method == "HIFO":
             sorted_lots = sorted(self.lots, key=lambda l: l.cost_basis, reverse=True)
         elif method == "FIFO":
