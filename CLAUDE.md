@@ -4,8 +4,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 # Guidelines
 - Default branch is `main`.
-- Always use `main` for code modifications, diffs, and commits.
-- Do not create new branches.
 
 ## Project Overview
 
@@ -117,10 +115,3 @@ Tax rates model Danish progressive capital gains: 27% up to 10k, 42% above.
 - `DecisionEngine` -> `TaxEngine` + `TradingCostConfig`
 - `FactorModel` -> `sklearn.linear_model.LinearRegression`
 - `MarketData.from_tickers` -> `yfinance`, `requests` (Fama-French download)
-
-## Debugging
-
-- `.vscode/launch.json`: runs `main.py` via debugpy
-- `.zed/debug.json`: runs active file
-
-Set breakpoints in `strategy/strategy.py` at `on_date()` or in `main.py`.

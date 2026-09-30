@@ -230,7 +230,7 @@ def plot_results(
     benchmark_prices: Union[dict[str, pd.Series], pd.Series, None],
     initial_value: float,
     exposure_history: Optional[list[dict]] = None,
-    show: bool = True,
+    show: bool = False,
 ) -> None:
     """
     benchmark_prices : dict[str, pd.Series] or pd.Series (legacy SPY-only path)

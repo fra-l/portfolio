@@ -38,11 +38,11 @@ class MarginConfig:
 @dataclass
 class BacktestConfig:
     # Data
-    start: str = "2020-01-01"
+    start: str = "2005-01-01"
     lookback_days: int = 252
     # Universe
     regions: list[str] = field(default_factory=lambda: ["US", "Europe", "Asia-Pacific"])
-    cap_tiers: list[str] = field(default_factory=lambda: ["mega", "large"])
+    cap_tiers: list[str] = field(default_factory=lambda: ["large", "mid", "small"])
     min_adv: float = 1e8
     # Factor model
     min_r2: float = 0.3
